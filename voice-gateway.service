@@ -1,0 +1,27 @@
+[Unit]
+Description=Voice Gateway for Claude Code Channels
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=voice-gateway
+Group=voice-gateway
+WorkingDirectory=/opt/voice-gateway
+EnvironmentFile=/opt/voice-gateway/.env
+ExecStart=/opt/voice-gateway/.venv/bin/uvicorn gateway:app --host 127.0.0.1 --port 8088
+Restart=on-failure
+RestartSec=5
+
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/tmp/voice-gateway
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+
+[Install]
+WantedBy=multi-user.target
