@@ -45,10 +45,12 @@ ELEVENLABS_MODEL = os.environ.get("ELEVENLABS_MODEL", "eleven_multilingual_v2")
 GATEWAY_TOKEN = os.environ["GATEWAY_AUTH_TOKEN"]
 PUBLIC_BASE_URL = os.environ["PUBLIC_BASE_URL"].rstrip("/")
 REPLY_TIMEOUT = int(os.environ.get("REPLY_TIMEOUT_SECONDS", "60"))
+CAR_REPLY_TIMEOUT = int(os.environ.get("CAR_REPLY_TIMEOUT_SECONDS", "120"))
 
 WHISPER_KEY = os.environ.get("OPENAI_API_KEY")  # optional, only for /voice/audio
 
 VOICE_MARKER = "[CHANNEL:VOICE]"
+CAR_MARKER = "[CHANNEL:CAR]"  # Andrija Car (Tesla browser app): text on a car screen
 AUDIO_DIR = Path(os.environ.get("AUDIO_DIR", "/tmp/voice-gateway"))
 AUDIO_DIR.mkdir(parents=True, exist_ok=True)
 AUDIO_TTL_SECONDS = 300
@@ -132,20 +134,21 @@ def split_voice_reply(reply: str) -> str:
     return reply.strip()
 
 
-async def send_to_bot_and_wait(text: str) -> str:
-    """Send a voice-marked message to the user's Claude Code bot and wait
-    for the reply. Serialised via voice_lock for clean correlation.
+async def send_to_bot_and_wait(text: str, marker: str = VOICE_MARKER,
+                               timeout: int = REPLY_TIMEOUT) -> str:
+    """Send a marked message to the user's Claude Code bot and wait for the
+    reply. Serialised via voice_lock for clean correlation.
     """
     async with voice_lock:
         future = asyncio.get_event_loop().create_future()
         pending_reply["current"] = future
 
-        payload = f"{VOICE_MARKER} {text}"
+        payload = f"{marker} {text}"
         await tg.send_message(app.state.bot_entity, payload)
         log.info(f"Sent to bot: {payload[:120]!r}")
 
         try:
-            return await asyncio.wait_for(future, timeout=REPLY_TIMEOUT)
+            return await asyncio.wait_for(future, timeout=timeout)
         except asyncio.TimeoutError:
             pending_reply.pop("current", None)
             raise HTTPException(504, "Bot did not reply within timeout")
@@ -256,6 +259,40 @@ async def voice_audio(
         "audio_url": audio_url,
         "spoken_text": speak_text,
     }
+
+
+@app.post("/car/text")
+async def car_text(
+    payload: dict,
+    authorization: Optional[str] = Header(None),
+):
+    """Andrija Car: text in, text out (no TTS — the car app asks /car/tts
+    separately only when the driver taps the speaker button)."""
+    require_auth(authorization)
+
+    text = (payload.get("text") or "").strip()
+    if not text:
+        raise HTTPException(400, "Empty text")
+    log.info(f"car/text query: {text[:120]!r}")
+
+    reply = await send_to_bot_and_wait(text, marker=CAR_MARKER, timeout=CAR_REPLY_TIMEOUT)
+    return {"reply": reply.strip()}
+
+
+@app.post("/car/tts")
+async def car_tts(
+    payload: dict,
+    authorization: Optional[str] = Header(None),
+):
+    """Speak a car reply on demand (same voice as the Shortcuts)."""
+    require_auth(authorization)
+
+    text = (payload.get("text") or "").strip()[:1500]
+    if not text:
+        raise HTTPException(400, "Empty text")
+    request_id = str(uuid.uuid4())
+    audio_path = await synthesize_speech(text, request_id)
+    return {"audio_url": f"{PUBLIC_BASE_URL}/audio/{audio_path.name}"}
 
 
 @app.get("/audio/{filename}")

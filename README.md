@@ -65,6 +65,8 @@ sudo systemctl enable --now voice-gateway
 |--------|------|-------------|
 | POST | `/voice/text` | Primary: receives Siri-transcribed text |
 | POST | `/voice/audio` | Backup: receives audio, transcribes via Whisper |
+| POST | `/car/text` | Andrija Car (Tesla browser app): text in, full text reply out, marker `[CHANNEL:CAR]`, timeout `CAR_REPLY_TIMEOUT_SECONDS` (default 120) |
+| POST | `/car/tts` | Synthesize a given text on demand (car app's speaker button) |
 | GET | `/audio/{name}` | Serves generated MP3 (TTL: 5 min) |
 | GET | `/health` | Liveness probe |
 
@@ -75,6 +77,10 @@ See [.env.example](.env.example) for all required and optional variables.
 ## Voice mode behaviour
 
 Add the snippet from SETUP.md Part 8 to your agent's `CLAUDE.md`. Messages prefixed with `[CHANNEL:VOICE]` trigger concise, markdown-free responses. If a reply contains `---`, only the text before it is spoken; everything after is forwarded to Telegram as text.
+
+## Car mode behaviour
+
+Messages prefixed with `[CHANNEL:CAR]` come from the Andrija Car web app on the Tesla screen. The agent's `CLAUDE.md` defines a restricted tier for them (read-only; state changes need confirmation on another channel). The whole reply is returned as text; speech is opt-in via `/car/tts`.
 
 ## Notes
 
