@@ -15,6 +15,7 @@ Endpoints:
 import asyncio
 import logging
 import os
+import re
 import secrets
 import time
 import uuid
@@ -66,8 +67,13 @@ tg = TelegramClient(StringSession(TG_SESSION), TG_API_ID, TG_API_HASH)
 # reply-to-request correlation trivial.
 voice_lock = asyncio.Lock()
 
-# Holds the Future awaiting the next bot reply (or None if no query in flight)
-pending_reply: dict[str, asyncio.Future] = {}
+# The query in flight: {"msg_id": id of our message as this account sees it, "future": Future}.
+# Only a bot message that REPLIES to msg_id resolves it. Before 2026-11-10 any bot message did,
+# so a cron alert from the same bot (uu_report, health_check, reminders…) could be read out as
+# the answer while the real one was lost. Andrija's CLAUDE.md tells it to reply with reply_to.
+pending_reply: dict = {}
+
+REQUEST_ID_RE = re.compile(r"[A-Za-z0-9_-]{1,64}")
 
 
 # -- Lifespan ----------------------------------------------------------------
@@ -84,11 +90,18 @@ async def lifespan(app: FastAPI):
     @tg.on(events.NewMessage(from_users=bot_entity.id))
     async def bot_reply_handler(event):
         text = event.message.message
-        log.info(f"Bot reply received: {text[:120]!r}")
-        if "current" in pending_reply:
-            future = pending_reply.pop("current")
-            if not future.done():
-                future.set_result(text)
+        reply_to = event.message.reply_to_msg_id
+        cur = pending_reply.get("current")
+        if cur and cur["msg_id"] is not None and reply_to == cur["msg_id"]:
+            pending_reply.pop("current", None)
+            log.info(f"Bot reply received (reply to {reply_to}): {text[:120]!r}")
+            if not cur["future"].done():
+                cur["future"].set_result(text)
+            return
+        if cur:
+            cur["unmatched"] = cur.get("unmatched", 0) + 1
+        log.info(f"Bot message ignored (reply_to={reply_to}, "
+                 f"waiting for {cur['msg_id'] if cur else None}): {text[:120]!r}")
 
     asyncio.create_task(cleanup_old_audio())
 
@@ -142,16 +155,21 @@ async def send_to_bot_and_wait(text: str, marker: str = VOICE_MARKER,
     """
     async with voice_lock:
         future = asyncio.get_event_loop().create_future()
-        pending_reply["current"] = future
+        cur = {"msg_id": None, "future": future}
+        pending_reply["current"] = cur
 
         payload = f"{marker} {text}"
-        await tg.send_message(app.state.bot_entity, payload)
-        log.info(f"Sent to bot: {payload[:120]!r}")
+        sent = await tg.send_message(app.state.bot_entity, payload)
+        cur["msg_id"] = sent.id
+        log.info(f"Sent to bot (msg {sent.id}): {payload[:120]!r}")
 
         try:
             return await asyncio.wait_for(future, timeout=timeout)
         except asyncio.TimeoutError:
             pending_reply.pop("current", None)
+            if cur.get("unmatched"):
+                log.warning(f"Timeout on msg {sent.id}: {cur['unmatched']} bot message(s) arrived "
+                            "without reply_to it — did Andrija forget reply_to?")
             raise HTTPException(504, "Bot did not reply within timeout")
 
 
@@ -214,7 +232,10 @@ async def voice_text(
     if not text:
         raise HTTPException(400, "Empty text")
 
-    request_id = payload.get("request_id") or str(uuid.uuid4())
+    # request_id ends up in a file name: accept only a safe token, else make one up.
+    request_id = str(payload.get("request_id") or "")
+    if not REQUEST_ID_RE.fullmatch(request_id):
+        request_id = str(uuid.uuid4())
     log.info(f"[{request_id}] voice/text query: {text[:120]!r}")
 
     reply = await send_to_bot_and_wait(text)

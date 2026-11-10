@@ -72,6 +72,13 @@ sudo systemctl enable --now voice-gateway
 
 FastAPI's `/docs`, `/redoc` and `/openapi.json` are disabled (the service is public).
 
+**Reply matching:** the gateway records the id of the message it sends and accepts only a bot message
+that *replies* to it (`reply_to`). Other messages from the same bot (cron alerts, reminders) are logged
+and ignored, so they can no longer be read out as the answer. The agent must answer
+`[CHANNEL:VOICE]` / `[CHANNEL:CAR]` messages with `reply_to` set to the incoming `message_id`.
+A timeout with unmatched bot messages logs a warning ("did Andrija forget reply_to?").
+`request_id` from `/voice/text` is used only if it matches `[A-Za-z0-9_-]{1,64}` (it names the MP3 file).
+
 ## Environment variables
 
 See [.env.example](.env.example) for all required and optional variables.
