@@ -110,7 +110,8 @@ async def cleanup_old_audio():
         await asyncio.sleep(60)
 
 
-app = FastAPI(lifespan=lifespan, title="Voice Gateway")
+# No /docs, /redoc or /openapi.json: the gateway is internet-facing and the schema only helps scanners.
+app = FastAPI(lifespan=lifespan, title="Voice Gateway", docs_url=None, redoc_url=None, openapi_url=None)
 
 
 # -- Helpers -----------------------------------------------------------------

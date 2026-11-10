@@ -70,6 +70,8 @@ sudo systemctl enable --now voice-gateway
 | GET | `/audio/{name}` | Serves generated MP3 (TTL: 5 min) |
 | GET | `/health` | Liveness probe |
 
+FastAPI's `/docs`, `/redoc` and `/openapi.json` are disabled (the service is public).
+
 ## Environment variables
 
 See [.env.example](.env.example) for all required and optional variables.
