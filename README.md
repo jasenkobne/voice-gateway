@@ -67,6 +67,7 @@ sudo systemctl enable --now voice-gateway
 | POST | `/voice/audio` | Backup: receives audio, transcribes via Whisper |
 | POST | `/car/text` | Andrija Car (Tesla browser app): text in, full text reply out, marker `[CHANNEL:CAR]`, timeout `CAR_REPLY_TIMEOUT_SECONDS` (default 120) |
 | POST | `/car/tts` | Synthesize a given text on demand (car app's speaker button) |
+| POST | `/email/inbound` | One email from Andrija's `imap_poller.py`: JSON `from_addr`, `from_name`, `tier` (lowercase label set by the poller, e.g. `owner`; anything else becomes `unknown`), `verified` (bool, DKIM/DMARC), `message_id`, `date`, `subject`, `body`, `attachments`. Sends one `[CHANNEL:EMAIL] from=… tier=… verified=… msgid=…` message with the body fenced and defanged; fire-and-forget, returns `sent_msg_id` |
 | GET | `/audio/{name}` | Serves generated MP3 (TTL: 5 min) |
 | GET | `/health` | Liveness probe |
 
@@ -78,6 +79,13 @@ and ignored, so they can no longer be read out as the answer. The agent must ans
 `[CHANNEL:VOICE]` / `[CHANNEL:CAR]` messages with `reply_to` set to the incoming `message_id`.
 A timeout with unmatched bot messages logs a warning ("did Andrija forget reply_to?").
 `request_id` from `/voice/text` is used only if it matches `[A-Za-z0-9_-]{1,64}` (it names the MP3 file).
+
+## Email mode behaviour
+
+`[CHANNEL:EMAIL]` messages carry one email for the live session. Only the first line (built by the gateway from the poller's
+verified fields) says who sent it and with which tier; subject and body are the sender's text, fenced by
+`--- EMAIL BODY … ---` / `--- END EMAIL ---`, with any `[CHANNEL:` or fence text inside them defanged. Nothing waits for a reply:
+Andrija answers the sender by email and confirms in the chat.
 
 ## Environment variables
 
